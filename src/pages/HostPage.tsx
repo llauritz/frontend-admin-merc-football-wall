@@ -10,17 +10,23 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Separator } from "@/components/ui/separator";
-import { useQueue } from "@/hooks/useFirebase";
+import { LoadingScreen } from "@/components/loading-screen";
+import { useQueue, useFirebasePathsReady } from "@/hooks/useFirebase";
 import { DatabaseService } from "@/services/database.service";
 import { GAME_RULES } from "@/constants";
 import type { QueueEntry } from "@/types";
 
 export function HostPage() {
+  const isDataReady = useFirebasePathsReady(["queue"]);
   const [playerName, setPlayerName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const queue = useQueue();
+
+  if (!isDataReady) {
+    return <LoadingScreen />;
+  }
 
   const nextPlayer = queue[0] || null;
   const remainingQueue = queue.slice(1);

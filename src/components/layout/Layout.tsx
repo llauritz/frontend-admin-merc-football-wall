@@ -1,4 +1,5 @@
-import { Outlet, Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CloudOff, Cloud, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,28 @@ interface LayoutProps {
 
 export function Layout({ title }: LayoutProps) {
   const isConnected = useConnectionStatus();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isSettingsPage = location.pathname === "/settings";
+
+  useEffect(() => {
+    if (!isSettingsPage) {
+      sessionStorage.setItem("lastNonSettingsPath", `${location.pathname}${location.search}${location.hash}`);
+    }
+  }, [isSettingsPage, location.hash, location.pathname, location.search]);
+
+  const handleSettingsClick = () => {
+    if (isSettingsPage) {
+      const fromState = (location.state as { from?: string } | null)?.from;
+      const targetPath = fromState || sessionStorage.getItem("lastNonSettingsPath") || "/admin";
+      navigate(targetPath, { replace: true });
+      return;
+    }
+
+    navigate("/settings", {
+      state: { from: `${location.pathname}${location.search}${location.hash}` },
+    });
+  };
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col border-x bg-background">
@@ -31,11 +54,9 @@ export function Layout({ title }: LayoutProps) {
             )}
           </Badge>
 
-          <Link to="/settings">
-            <Button variant="ghost" size="icon">
-              <Settings className="size-4" />
-            </Button>
-          </Link>
+          <Button variant="ghost" size="icon" onClick={handleSettingsClick} aria-label="Settings">
+            <Settings className="size-4" />
+          </Button>
         </div>
       </header>
 

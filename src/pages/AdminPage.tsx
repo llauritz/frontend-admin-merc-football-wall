@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { useGameState, useIdleMessages, useQueue, useSettings, useTimeRemaining } from "@/hooks/useFirebase";
+import { LoadingScreen } from "../components/loading-screen";
+import { useGameState, useIdleMessages, useQueue, useSettings, useTimeRemaining, useFirebasePathsReady } from "@/hooks/useFirebase";
 import { DatabaseService } from "@/services/database.service";
 import { TARGET_CONFIGS } from "@/constants";
 import type { GameState, TargetConfig, QueueEntry } from "@/types";
@@ -19,6 +20,7 @@ const TAB_LABELS: Record<string, string> = {
 };
 
 export function AdminPage() {
+  const isDataReady = useFirebasePathsReady(["gameState", "queue", "settings", "idleMessages"]);
   const gameState = useGameState();
   const queue = useQueue();
   const settings = useSettings();
@@ -31,6 +33,10 @@ export function AdminPage() {
       console.error("Failed to initialize idle message pool:", error);
     });
   }, []);
+
+  if (!isDataReady) {
+    return <LoadingScreen />;
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4">

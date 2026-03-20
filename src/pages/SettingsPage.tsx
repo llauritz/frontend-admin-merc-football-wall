@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { useSettings, useDatabaseSnapshot } from "@/hooks/useFirebase";
+import { LoadingScreen } from "@/components/loading-screen";
+import { useSettings, useDatabaseSnapshot, useFirebasePathsReady } from "@/hooks/useFirebase";
 import { DatabaseService } from "@/services/database.service";
 import { useTheme } from "@/components/theme-provider";
 
 export function SettingsPage() {
+  const isDataReady = useFirebasePathsReady(["settings"]);
   const settings = useSettings();
   const dbSnapshot = useDatabaseSnapshot();
   const { theme, setTheme } = useTheme();
@@ -23,6 +25,10 @@ export function SettingsPage() {
     setTimeLimit(settings.timeLimit.toString());
     setWinThreshold(settings.instantWinThreshold.toString());
   }, [settings]);
+
+  if (!isDataReady) {
+    return <LoadingScreen />;
+  }
 
   const handleTimeLimitChange = (value: string) => {
     setTimeLimit(value);

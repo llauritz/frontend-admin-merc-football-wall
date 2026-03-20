@@ -29,6 +29,41 @@ export function useConnectionStatus(): boolean {
 }
 
 // ==========================================
+// DATA READY HOOK
+// ==========================================
+
+export function useFirebasePathsReady(paths: string[]): boolean {
+  const [isReady, setIsReady] = useState(false);
+  const uniquePaths = Array.from(new Set(paths));
+  const pathsKey = uniquePaths.sort().join("|");
+
+  useEffect(() => {
+    if (uniquePaths.length === 0) {
+      setIsReady(true);
+      return;
+    }
+
+    setIsReady(false);
+
+    const loadedPaths = new Set<string>();
+    const unsubscribers = uniquePaths.map((path) =>
+      onValue(ref(db, path), () => {
+        loadedPaths.add(path);
+        if (loadedPaths.size === uniquePaths.length) {
+          setIsReady(true);
+        }
+      })
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [pathsKey]);
+
+  return isReady;
+}
+
+// ==========================================
 // GAME STATE HOOK
 // ==========================================
 
