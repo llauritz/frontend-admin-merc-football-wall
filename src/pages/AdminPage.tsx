@@ -246,19 +246,19 @@ function PreparingState({ playerName }: { playerName: string }) {
 
       <p className="text-3xl font-semibold">Get ready!</p>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-10">
         <Button onClick={handleStartGame} size="lg" className="min-w-48">
-          <Play className="mr-2 size-5" />
+          <Play className="mr-1 size-4" />
           Start game
         </Button>
-        <div className="flex gap-2">
-          <Button onClick={handleBack} variant="ghost">
-            <ArrowLeft className="mr-2 size-4" />
-            Back
-          </Button>
+        <div className="flex flex-col gap-2">
           <Button onClick={handleSkip} variant="outline">
-            <SkipForward className="mr-2 size-4" />
-            Skip
+            <SkipForward className="mr-1 size-4" />
+            Skip Player
+          </Button>
+          <Button onClick={handleBack} variant="ghost">
+            <ArrowLeft className="mr-1 size-4" />
+            Back
           </Button>
         </div>
       </div>
@@ -317,6 +317,20 @@ function GameStateView({
 }) {
   const timeRemaining = useTimeRemaining(startedAt, timeLimit);
   const hasFinishedRef = useRef(false);
+  const leftTargets = TARGET_CONFIGS.filter((t) => t.id.startsWith("left"));
+  const rightTargets = TARGET_CONFIGS.filter((t) => t.id.startsWith("right"));
+  const centerTarget = TARGET_CONFIGS.find((t) => t.id === "center_100");
+  const wallTargets: Array<TargetConfig | null> = [
+    leftTargets[0] ?? null,
+    null,
+    rightTargets[0] ?? null,
+    leftTargets[1] ?? null,
+    centerTarget ?? null,
+    rightTargets[1] ?? null,
+    leftTargets[2] ?? null,
+    null,
+    rightTargets[2] ?? null,
+  ];
 
   // End game when time runs out (backup to server function)
   useEffect(() => {
@@ -358,28 +372,18 @@ function GameStateView({
 
       <Separator />
 
-      {/* Score Input Grid */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* Left Column */}
-        <div className="flex flex-col gap-3">
-          {TARGET_CONFIGS.filter((t) => t.id.startsWith("left")).map((target) => (
-            <ScoreButton key={target.id} target={target} onScore={handleScore} />
-          ))}
-        </div>
-
-        {/* Center Column */}
-        <div className="flex items-center justify-center">
-          <ScoreButton
-            target={TARGET_CONFIGS.find((t) => t.id === "center_100")!}
-            onScore={handleScore}
-            large
-          />
-        </div>
-
-        {/* Right Column */}
-        <div className="flex flex-col gap-3">
-          {TARGET_CONFIGS.filter((t) => t.id.startsWith("right")).map((target) => (
-            <ScoreButton key={target.id} target={target} onScore={handleScore} />
+      {/* Score Input Wall */}
+      <div className="relative overflow-hidden rounded-3xl border border-border/80 bg-linear-to-b from-muted/40 via-background to-muted/20 p-3 sm:p-6">
+        <div className="pointer-events-none absolute inset-x-6 top-1/2 hidden h-px -translate-y-1/2 bg-border/60 md:block" />
+        <div className="mx-auto grid aspect-square w-full max-w-4xl grid-cols-3 grid-rows-3 gap-2 sm:gap-4">
+          {wallTargets.map((target, index) => (
+            <div key={target?.id ?? `empty-${index}`} className="flex items-center justify-center">
+              {target ? (
+                <ScoreButton target={target} onScore={handleScore} />
+              ) : (
+                <div className="size-full" aria-hidden />
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -404,18 +408,15 @@ function GameStateView({
 function ScoreButton({
   target,
   onScore,
-  large = false,
 }: {
   target: TargetConfig;
   onScore: (target: TargetConfig) => void;
-  large?: boolean;
 }) {
   return (
     <Button
       onClick={() => onScore(target)}
       variant="outline"
-      className={`rounded-full font-bold ${large ? "size-32 text-3xl" : "size-20 text-xl"
-        }`}
+      className="size-full rounded-full border-2 border-primary bg-background/95 font-bold text-foreground text-[clamp(1.2rem,3.4vw,2.3rem)] shadow-sm backdrop-blur transition-[transform,colors,box-shadow] duration-100 hover:scale-[1.02] hover:border-primary hover:bg-primary/12 active:scale-95 active:border-primary active:bg-primary/25 active:text-foreground active:ring-4 active:ring-primary active:shadow-lg focus-visible:ring-4 focus-visible:ring-primary"
     >
       {target.label}
     </Button>
