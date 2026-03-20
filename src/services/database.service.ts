@@ -64,17 +64,6 @@ export const DatabaseService = {
     }
   },
 
-  /** Updates game settings */
-  /* async updateSettings(settings: Partial<GameSettings>): Promise<void> {
-    try {
-      const currentSettings = await this.getSettings();
-      await set(ref(db, "settings"), { ...currentSettings, ...settings });
-    } catch (error) {
-      console.error("Error updating settings:", error);
-      throw error;
-    }
-  }, */
-
   // THE EFFICIENT WAY:
   async updateSettings(settings: Partial<GameSettings>): Promise<void> {
     // This updates only the provided keys and leaves the rest alone
@@ -100,30 +89,6 @@ export const DatabaseService = {
       throw error;
     }
   },
-
-  /** Records a hit and updates the total score */
-  /* async recordHit(targetId: TargetId, points: number, timeToHitMs: number = 0): Promise<void> {
-    try {
-      // Add the hit
-      const hitsRef = ref(db, "currentGame/hits");
-      const newHitRef = push(hitsRef);
-      await set(newHitRef, {
-        targetId,
-        points,
-        timeToHitMs,
-        timestamp: Date.now(),
-      } as Hit);
-
-      // Update total score
-      const scoreRef = ref(db, "currentGame/totalScore");
-      const snapshot = await get(scoreRef);
-      const currentScore = snapshot.exists() ? snapshot.val() : 0;
-      await set(scoreRef, currentScore + points);
-    } catch (error) {
-      console.error("Error recording hit:", error);
-      throw error;
-    }
-  }, */
 
   async recordHit(targetId: TargetId, points: number, timeToHitMs: number = 0): Promise<void> {
     try {
