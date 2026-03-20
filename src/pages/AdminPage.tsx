@@ -322,7 +322,7 @@ function GameStateView({
   useEffect(() => {
     if (timeRemaining <= 0 && !hasFinishedRef.current) {
       hasFinishedRef.current = true;
-      DatabaseService.finishGameNew();
+      DatabaseService.finishGame();
     }
   }, [timeRemaining]);
 
@@ -335,7 +335,7 @@ function GameStateView({
   };
 
   const handleStop = async () => {
-    await DatabaseService.finishGameNew();
+    await DatabaseService.finishGame();
   };
 
   return (

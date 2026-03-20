@@ -12,7 +12,7 @@ export function Layout({ title }: LayoutProps) {
   const isConnected = useConnectionStatus();
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col border-x bg-background">
       <header className="sticky top-0 z-50 flex h-14 items-center justify-between border-b bg-background px-4">
         <h1 className="text-lg font-semibold">{title}</h1>
 

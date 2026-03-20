@@ -1,9 +1,7 @@
 import { ref, get, set, update, push, increment, runTransaction, query, orderByChild, limitToLast, remove } from "firebase/database";
 import { db } from "@/firebase";
 import type {
-  GameControl,
   GameSettings,
-  CurrentGame,
   LeaderboardEntry,
   GameState,
   TargetId,
@@ -15,38 +13,10 @@ import { DEFAULT_SETTINGS, DEFAULT_GAME_STATE, DEFAULT_IDLE_MESSAGES } from "@/c
 
 // ==========================================
 // DATABASE SERVICE
-// All Firebase database operations
+// All Firebase database operations (New Schema Only)
 // ==========================================
 
 export const DatabaseService = {
-  // ----------------------------------------
-  // GAME CONTROL OPERATIONS
-  // ----------------------------------------
-
-  /** Updates the game state */
-  async setGameState(gameState: GameState, idleMessage?: string): Promise<void> {
-    try {
-      const updates: Partial<GameControl> = { gameState };
-      if (idleMessage !== undefined) {
-        updates.idleMessage = idleMessage;
-      }
-      await update(ref(db, "control"), updates);
-    } catch (error) {
-      console.error("Error setting game state:", error);
-      throw error;
-    }
-  },
-
-  /** Sets the idle display message */
-  async setIdleMessage(message: string): Promise<void> {
-    try {
-      await update(ref(db, "control"), { idleMessage: message });
-    } catch (error) {
-      console.error("Error setting idle message:", error);
-      throw error;
-    }
-  },
-
   // ----------------------------------------
   // SETTINGS OPERATIONS
   // ----------------------------------------
@@ -65,70 +35,9 @@ export const DatabaseService = {
     }
   },
 
-  // THE EFFICIENT WAY:
+  /** Updates only the provided settings keys */
   async updateSettings(settings: Partial<GameSettings>): Promise<void> {
-    // This updates only the provided keys and leaves the rest alone
     await update(ref(db, "settings"), settings);
-  },
-
-  // ----------------------------------------
-  // CURRENT GAME OPERATIONS
-  // ----------------------------------------
-
-  /** Initializes a new game session */
-  async startNewGame(playerId: string, playerName: string): Promise<void> {
-    try {
-      await set(ref(db, "currentGame"), {
-        playerId,
-        playerName,
-        totalScore: 0,
-        startedAt: Date.now(),
-        hits: {},
-      });
-    } catch (error) {
-      console.error("Error starting game:", error);
-      throw error;
-    }
-  },
-
-  async recordHit(targetId: TargetId, points: number, timeToHitMs: number = 0): Promise<void> {
-    try {
-      // 1. Generate a unique key for the new hit locally (NO network trip yet)
-      const newHitKey = push(ref(db, "currentGame/hits")).key;
-
-      // 2. Build our payload of simultaneous updates
-      const updates: { [key: string]: any } = {};
-
-      // Path A: The new hit data
-      updates[`currentGame/hits/${newHitKey}`] = {
-        targetId,
-        points,
-        timeToHitMs,
-        timestamp: Date.now(),
-      };
-
-      // Path B: The score increment
-      updates[`currentGame/totalScore`] = increment(points);
-
-      // 3. Fire them both to Firebase in ONE single network trip
-      // Note: We call update() on the root reference `ref(db)`
-      await update(ref(db), updates);
-
-    } catch (error) {
-      console.error("Error recording hit:", error);
-      throw error;
-    }
-  },
-
-  /** Gets the current game data */
-  async getCurrentGame(): Promise<CurrentGame | null> {
-    try {
-      const snapshot = await get(ref(db, "currentGame"));
-      return snapshot.exists() ? (snapshot.val() as CurrentGame) : null;
-    } catch (error) {
-      console.error("Error fetching current game:", error);
-      return null;
-    }
   },
 
   // ----------------------------------------
@@ -141,7 +50,6 @@ export const DatabaseService = {
       const playerRef = ref(db, `players/${uid}`);
       const now = Date.now();
 
-      // runTransaction safely handles the read and write on Google's servers
       await runTransaction(playerRef, (player) => {
         if (player) {
           player.lifetimeScore = (player.lifetimeScore || 0) + scoreToAdd;
@@ -166,57 +74,8 @@ export const DatabaseService = {
   },
 
   // ----------------------------------------
-  // LEADERBOARD & END GAME OPERATIONS
+  // LEADERBOARD OPERATIONS
   // ----------------------------------------
-
-  // Note: submitToLeaderboard logic has been absorbed into finishGame for efficiency
-
-  /** Finishes the current game, submits results, clears game data, and updates state */
-  async finishGame(): Promise<void> {
-    try {
-      const currentGame = await this.getCurrentGame();
-
-      // If there's no game data, just cleanly end the game state
-      if (!currentGame) {
-        await this.setGameState("finished");
-        return;
-      }
-
-      const now = new Date();
-      const dateString = now.toISOString().split("T")[0];
-
-      // 1. Generate a new leaderboard key locally
-      const newLeaderboardKey = push(ref(db, "leaderboard")).key;
-
-      // 2. Build our payload for simultaneous updates
-      const updates: { [key: string]: any } = {};
-
-      // Add result to leaderboard (query with orderByChild('score') to get sorted results)
-      updates[`leaderboard/${newLeaderboardKey}`] = {
-        playerId: currentGame.playerId,
-        playerName: currentGame.playerName,
-        score: currentGame.totalScore,
-        dateString,
-        timestamp: now.getTime(),
-      };
-
-      // Clear the current game data
-      updates[`currentGame`] = null;
-
-      // Update game state to finished
-      updates[`control/gameState`] = "finished";
-
-      // 3. Execute the Fan-Out AND the Transaction at the exact same time
-      await Promise.all([
-        update(ref(db), updates), // Writes Leaderboard, clears currentGame & updates GameState
-        this.updatePlayerStats(currentGame.playerId, currentGame.playerName, currentGame.totalScore)
-      ]);
-
-    } catch (error) {
-      console.error("Error finishing game:", error);
-      throw error;
-    }
-  },
 
   /** Fetches leaderboard entries sorted by score (descending) */
   async getLeaderboard(limit: number = 10): Promise<LeaderboardEntry[]> {
@@ -234,7 +93,6 @@ export const DatabaseService = {
         entries.push({ id: child.key!, ...child.val() });
       });
 
-      // Firebase limitToLast returns ascending order, reverse for descending (highest first)
       return entries.reverse();
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
@@ -243,7 +101,7 @@ export const DatabaseService = {
   },
 
   // ----------------------------------------
-  // QUEUE OPERATIONS (NEW SCHEMA)
+  // QUEUE OPERATIONS
   // ----------------------------------------
 
   /** Adds a player to the queue */
@@ -297,7 +155,7 @@ export const DatabaseService = {
   },
 
   // ----------------------------------------
-  // GAME STATE OPERATIONS (NEW SCHEMA)
+  // GAME STATE OPERATIONS
   // ----------------------------------------
 
   /** Updates the game status */
@@ -373,8 +231,6 @@ export const DatabaseService = {
           : [...DEFAULT_IDLE_MESSAGES];
 
         const nextMessages = currentMessages.filter((item) => item !== message);
-
-        // Keep at least one value so UI controls never become empty.
         return nextMessages.length > 0 ? nextMessages : [DEFAULT_IDLE_MESSAGES[0]];
       });
     } catch (error) {
@@ -383,12 +239,10 @@ export const DatabaseService = {
     }
   },
 
-  /** Prepares a game for the next player (keeps player in queue until game starts) */
+  /** Prepares a game for the next player */
   async prepareGame(player: CurrentPlayer, queueKey: string): Promise<void> {
     try {
       const updates: Record<string, unknown> = {};
-
-      // Set current player and status, store queueKey for later removal
       updates["gameState/status"] = "preparing";
       updates["gameState/currentPlayer"] = player;
       updates["gameState/currentQueueKey"] = queueKey;
@@ -418,7 +272,6 @@ export const DatabaseService = {
       const gameState = gameSnapshot.val() as GameStateData;
       const currentQueueKey = gameState.currentQueueKey;
 
-      // Get all queue entries sorted by timestamp
       const queueEntries: Array<{ key: string; data: QueueEntry }> = [];
       if (queueSnapshot.exists()) {
         queueSnapshot.forEach((child) => {
@@ -429,16 +282,13 @@ export const DatabaseService = {
 
       const updates: Record<string, unknown> = {};
 
-      // Remove current player from queue
       if (currentQueueKey) {
         updates[`queue/${currentQueueKey}`] = null;
       }
 
-      // Find next player (excluding the one we're removing)
       const nextEntry = queueEntries.find((e) => e.key !== currentQueueKey);
 
       if (nextEntry) {
-        // Prepare the next player
         updates["gameState/status"] = "preparing";
         updates["gameState/currentPlayer"] = {
           id: nextEntry.data.id,
@@ -448,7 +298,6 @@ export const DatabaseService = {
         updates["gameState/currentScore"] = 0;
         updates["gameState/hits"] = null;
       } else {
-        // No more players, return to idle
         updates["gameState/status"] = "idle";
         updates["gameState/currentPlayer"] = null;
         updates["gameState/currentQueueKey"] = null;
@@ -477,7 +326,6 @@ export const DatabaseService = {
   /** Starts the actual game and removes player from queue */
   async startGame(): Promise<void> {
     try {
-      // First get the current queue key to remove
       const gameStateSnapshot = await get(ref(db, "gameState"));
       const queueKey = gameStateSnapshot.exists()
         ? gameStateSnapshot.val().currentQueueKey
@@ -490,7 +338,6 @@ export const DatabaseService = {
       updates["gameState/hits"] = null;
       updates["gameState/currentQueueKey"] = null;
 
-      // Remove player from queue now that game is starting
       if (queueKey) {
         updates[`queue/${queueKey}`] = null;
       }
@@ -540,7 +387,6 @@ export const DatabaseService = {
       const hitKeys = Object.keys(gameState.hits);
       if (hitKeys.length === 0) return;
 
-      // Get last hit
       const lastHitKey = hitKeys[hitKeys.length - 1];
       const lastHit = gameState.hits[lastHitKey];
 
@@ -560,7 +406,7 @@ export const DatabaseService = {
   },
 
   /** Finishes the game and archives the score */
-  async finishGameNew(): Promise<{ score: number; isWinner: boolean } | null> {
+  async finishGame(): Promise<{ score: number; isWinner: boolean } | null> {
     try {
       const gameStateRef = ref(db, "gameState");
       const settingsRef = ref(db, "settings");
@@ -584,12 +430,10 @@ export const DatabaseService = {
       const score = gameState.currentScore || 0;
       const isWinner = score >= settings.instantWinThreshold;
 
-      // Generate leaderboard key
       const newLeaderboardKey = push(ref(db, "leaderboard")).key;
 
       const updates: Record<string, unknown> = {};
 
-      // Add to leaderboard
       updates[`leaderboard/${newLeaderboardKey}`] = {
         playerId: gameState.currentPlayer.id,
         playerName: gameState.currentPlayer.name,
@@ -598,10 +442,8 @@ export const DatabaseService = {
         timestamp: now.getTime(),
       };
 
-      // Update game state to finished
       updates["gameState/status"] = "finished";
 
-      // Execute updates and player stats in parallel
       await Promise.all([
         update(ref(db), updates),
         this.updatePlayerStats(
@@ -645,4 +487,4 @@ export const DatabaseService = {
       throw error;
     }
   },
-}
+};
