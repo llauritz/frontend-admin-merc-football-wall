@@ -1,4 +1,4 @@
-import { ref, get, set, update, push, onValue, off, increment } from "firebase/database";
+import { ref, get, set, update, push, onValue, off, increment, runTransaction, query, orderByChild, limitToLast } from "firebase/database";
 import { db } from "@/firebase";
 import type {
   Player,
@@ -126,17 +126,32 @@ export const DatabaseService = {
   }, */
 
   async recordHit(targetId: TargetId, points: number, timeToHitMs: number = 0): Promise<void> {
-    // 1. Record the hit
-    const newHitRef = push(ref(db, "currentGame/hits"));
-    await set(newHitRef, {
-      targetId,
-      points,
-      timeToHitMs,
-      timestamp: Date.now(),
-    });
+    try {
+      // 1. Generate a unique key for the new hit locally (NO network trip yet)
+      const newHitKey = push(ref(db, "currentGame/hits")).key;
 
-    // 2. Atomically increment the total score (1 network trip, race-condition safe)
-    await set(ref(db, "currentGame/totalScore"), increment(points));
+      // 2. Build our payload of simultaneous updates
+      const updates: { [key: string]: any } = {};
+
+      // Path A: The new hit data
+      updates[`currentGame/hits/${newHitKey}`] = {
+        targetId,
+        points,
+        timeToHitMs,
+        timestamp: Date.now(),
+      };
+
+      // Path B: The score increment
+      updates[`currentGame/totalScore`] = increment(points);
+
+      // 3. Fire them both to Firebase in ONE single network trip
+      // Note: We call update() on the root reference `ref(db)`
+      await update(ref(db), updates);
+
+    } catch (error) {
+      console.error("Error recording hit:", error);
+      throw error;
+    }
   },
 
   /** Gets the current game data */
@@ -154,41 +169,30 @@ export const DatabaseService = {
   // PLAYER OPERATIONS
   // ----------------------------------------
 
-  /** Fetches a player by UID */
-  async getPlayer(uid: string): Promise<Player | null> {
-    try {
-      const snapshot = await get(ref(db, `players/${uid}`));
-      return snapshot.exists() ? (snapshot.val() as Player) : null;
-    } catch (error) {
-      console.error("Error fetching player:", error);
-      return null;
-    }
-  },
-
-  /** Updates player statistics after a game */
+  /** Updates player statistics after a game safely via Transaction */
   async updatePlayerStats(uid: string, displayName: string, scoreToAdd: number): Promise<void> {
     try {
       const playerRef = ref(db, `players/${uid}`);
-      const snapshot = await get(playerRef);
       const now = Date.now();
 
-      if (snapshot.exists()) {
-        const player = snapshot.val() as Player;
-        await update(playerRef, {
-          lifetimeScore: player.lifetimeScore + scoreToAdd,
-          gamesPlayed: player.gamesPlayed + 1,
-          lastPlayed: now,
-          personalBest: Math.max(player.personalBest, scoreToAdd),
-        });
-      } else {
-        await set(playerRef, {
-          displayName,
-          lifetimeScore: scoreToAdd,
-          gamesPlayed: 1,
-          lastPlayed: now,
-          personalBest: scoreToAdd,
-        } as Player);
-      }
+      // runTransaction safely handles the read and write on Google's servers
+      await runTransaction(playerRef, (player) => {
+        if (player) {
+          player.lifetimeScore = (player.lifetimeScore || 0) + scoreToAdd;
+          player.gamesPlayed = (player.gamesPlayed || 0) + 1;
+          player.lastPlayed = now;
+          player.personalBest = Math.max(player.personalBest || 0, scoreToAdd);
+        } else {
+          return {
+            displayName,
+            lifetimeScore: scoreToAdd,
+            gamesPlayed: 1,
+            lastPlayed: now,
+            personalBest: scoreToAdd,
+          };
+        }
+        return player;
+      });
     } catch (error) {
       console.error("Error updating player stats:", error);
       throw error;
@@ -196,53 +200,79 @@ export const DatabaseService = {
   },
 
   // ----------------------------------------
-  // LEADERBOARD OPERATIONS
+  // LEADERBOARD & END GAME OPERATIONS
   // ----------------------------------------
 
-  /** Submits a game result to the leaderboard */
-  async submitToLeaderboard(
-    playerId: string,
-    playerName: string,
-    finalScore: number
-  ): Promise<void> {
-    try {
-      const now = new Date();
-      const dateString = now.toISOString().split("T")[0];
+  // Note: submitToLeaderboard logic has been absorbed into finishGame for efficiency
 
-      const leaderboardRef = ref(db, "leaderboard");
-      const newEntryRef = push(leaderboardRef);
-
-      await set(newEntryRef, {
-        playerId,
-        playerName,
-        score: finalScore,
-        dateString,
-        timestamp: now.getTime(),
-      } as LeaderboardEntry);
-
-      // Update player stats
-      await this.updatePlayerStats(playerId, playerName, finalScore);
-    } catch (error) {
-      console.error("Error submitting to leaderboard:", error);
-      throw error;
-    }
-  },
-
-  /** Finishes the current game and submits results */
+  /** Finishes the current game, submits results, clears game data, and updates state */
   async finishGame(): Promise<void> {
     try {
       const currentGame = await this.getCurrentGame();
-      if (currentGame) {
-        await this.submitToLeaderboard(
-          currentGame.playerId,
-          currentGame.playerName,
-          currentGame.totalScore
-        );
+
+      // If there's no game data, just cleanly end the game state
+      if (!currentGame) {
+        await this.setGameState("finished");
+        return;
       }
-      await this.setGameState("finished");
+
+      const now = new Date();
+      const dateString = now.toISOString().split("T")[0];
+
+      // 1. Generate a new leaderboard key locally
+      const newLeaderboardKey = push(ref(db, "leaderboard")).key;
+
+      // 2. Build our payload for simultaneous updates
+      const updates: { [key: string]: any } = {};
+
+      // Add result to leaderboard (query with orderByChild('score') to get sorted results)
+      updates[`leaderboard/${newLeaderboardKey}`] = {
+        playerId: currentGame.playerId,
+        playerName: currentGame.playerName,
+        score: currentGame.totalScore,
+        dateString,
+        timestamp: now.getTime(),
+      };
+
+      // Clear the current game data
+      updates[`currentGame`] = null;
+
+      // Update game state to finished
+      updates[`control/gameState`] = "finished";
+
+      // 3. Execute the Fan-Out AND the Transaction at the exact same time
+      await Promise.all([
+        update(ref(db), updates), // Writes Leaderboard, clears currentGame & updates GameState
+        this.updatePlayerStats(currentGame.playerId, currentGame.playerName, currentGame.totalScore)
+      ]);
+
     } catch (error) {
       console.error("Error finishing game:", error);
       throw error;
     }
   },
-};
+
+  /** Fetches leaderboard entries sorted by score (descending) */
+  async getLeaderboard(limit: number = 10): Promise<LeaderboardEntry[]> {
+    try {
+      const leaderboardRef = ref(db, "leaderboard");
+      const leaderboardQuery = query(leaderboardRef, orderByChild("score"), limitToLast(limit));
+      const snapshot = await get(leaderboardQuery);
+
+      if (!snapshot.exists()) {
+        return [];
+      }
+
+      const entries: LeaderboardEntry[] = [];
+      snapshot.forEach((child) => {
+        entries.push({ id: child.key!, ...child.val() });
+      });
+
+      // Firebase limitToLast returns ascending order, reverse for descending (highest first)
+      return entries.reverse();
+    } catch (error) {
+      console.error("Error fetching leaderboard:", error);
+      return [];
+    }
+  }
+}
